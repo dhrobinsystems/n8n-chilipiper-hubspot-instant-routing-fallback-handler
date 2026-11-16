@@ -1,0 +1,1503 @@
+{
+  "name": "Chili Piper HubSpot Instant Routing Fallback Handler (dhRobin Systems)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## n8n-chilipiper-hubspot-instant-routing-fallback-handler\n**dhRobin Systems** · Failed Chili Piper / Calendly / HubSpot routing → verified, normalised → active SDR (owner → territory round-robin → default pool → default SDR) → HubSpot task + note + contact update → Slack alert → audit.\n\n**Safe by default.** With no environment variables set:\n- `SANDBOX_MODE=true`: synthetic HubSpot context. **Zero external calls.**\n- `DRY_RUN=true`: everything is composed, nothing is sent.\n- `CREATE_FALLBACK_TASKS=false`, `SEND_SLACK_ALERTS=false`: each write needs an explicit opt-in.\n\nWebhook secrets are read only in memory for signature checks and never output.",
+        "height": 420,
+        "width": 620,
+        "color": 5
+      },
+      "id": "4ca0681c-1219-58eb-96f6-a4d9bc888da6",
+      "name": "Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -760,
+        -460
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Pinned synthetic payloads\nPinned: webhook (Calendly routing-form failure), contact search, owners, contact upsert, task batch, note batch, Slack.\n\nPins apply to **manual executions only**; production webhook executions ignore them. Unpin a node before a manual live test of that integration.",
+        "height": 220,
+        "width": 420,
+        "color": 3
+      },
+      "id": "adc91a3e-ad8b-5477-8b3e-d9c693e56940",
+      "name": "Pinned Data Notice",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1240,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "routing/fallback",
+        "responseMode": "onReceived",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "1639e655-6209-5051-bd10-bb07a6dfbc87",
+      "name": "Routing Failure Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -700,
+        160
+      ],
+      "webhookId": "6037341f-04a6-531b-a8fd-e1209cffc8aa",
+      "notes": "One URL per source: ?source=chilipiper | calendly | hubspot. Raw body kept for HMAC. Responds 200 immediately.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {},
+      "id": "bc59c191-9e75-5f55-a5d0-9d44342cf16f",
+      "name": "Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -700,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────────\n// Build Synthetic Failure Events (Manual Test Trigger path)\n// Emits a webhook-shaped request carrying a batch of fictitious Chili Piper\n// router events. Paths covered: territory routing (US-East, EMEA), existing\n// owner continuity, default pool, cooldown duplicate, a successful booking\n// (ignored), an invalid email (rejected) and a replayed event ID.\n// ─────────────────────────────────────────────────────────────────────────────\nconst now = Date.now();\nconst iso = (msAgo) => new Date(now - msAgo).toISOString();\nconst ev = (id, type, lead, extra = {}) => ({\n  id, event: type, occurredAt: iso(60000), routerName: 'Inbound Demo Router (synthetic)',\n  lead, routing: { status: type.includes('booked') ? 'booked' : 'failed', reason: extra.reason || null }, meetingUrl: extra.meetingUrl || null, ...extra.more,\n});\n\nreturn [{\n  json: {\n    headers: { 'content-type': 'application/json', 'user-agent': 'synthetic-router-test' },\n    params: {},\n    query: { source: 'chilipiper' },\n    body: [\n      ev('cp-syn-0001', 'routing.failed', { firstName: 'Alex', lastName: 'Miller', email: 'alex@company.example', company: 'Company Example Ltd', phone: '+1 555 010 1001', country: 'US', state: 'NY', companySize: '201-500' }, { reason: 'no_rep_available', meetingUrl: 'https://scheduler.example/m/cp-syn-0001' }),\n      ev('cp-syn-0002', 'routing.no_match', { first_name: 'Priya', last_name: 'Shah', email: 'priya@brightfield.example', company_name: 'Brightfield Example', country: 'GB' }, { reason: 'no_matching_queue' }),\n      ev('cp-syn-0003', 'routing.abandoned', { firstName: 'Diego', lastName: 'Ramos', email: 'diego@sandcastle.example', company: 'Sandcastle Example', country: 'BR' }, { reason: 'prospect_closed_scheduler' }),\n      ev('cp-syn-0004', 'routing.failed', { firstName: 'Morgan', lastName: 'Diaz', email: 'morgan@company.example', company: 'Company Example Ltd', country: 'US', state: 'CA' }, { reason: 'calendar_sync_error' }),\n      ev('cp-syn-0005', 'meeting.booked', { firstName: 'Jamie', lastName: 'Fox', email: 'jamie@company.example', company: 'Company Example Ltd' }),\n      ev('cp-syn-0006', 'routing.failed', { firstName: 'Sam', lastName: 'Ortiz', email: 'not-an-email', company: 'Unknown' }, { reason: 'no_rep_available' }),\n      ev('cp-syn-0001', 'routing.failed', { firstName: 'Alex', lastName: 'Miller', email: 'alex@company.example', company: 'Company Example Ltd', country: 'US', state: 'NY' }, { reason: 'no_rep_available' }),\n    ],\n    webhookUrl: 'https://n8n.example/webhook/routing/fallback',\n    executionMode: 'test',\n  },\n}];\n"
+      },
+      "id": "49b6b914-c543-59db-b903-b1854874f42a",
+      "name": "Build Synthetic Failure Events",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        380
+      ],
+      "notes": "Seven fictitious Chili Piper router events.",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cc2a1059-66c9-5d75-b4b9-e1f1c69a31fd",
+              "name": "config.sandboxMode",
+              "value": "={{ String($env.SANDBOX_MODE ?? 'true').trim().toLowerCase() !== 'false' }}",
+              "type": "boolean"
+            },
+            {
+              "id": "f0b2a640-c517-5f75-9f1b-fac74d81504b",
+              "name": "config.dryRun",
+              "value": "={{ String($env.DRY_RUN ?? 'true').trim().toLowerCase() !== 'false' }}",
+              "type": "boolean"
+            },
+            {
+              "id": "48f25921-23f1-5f4a-8c9b-b182bef61ebd",
+              "name": "config.createFallbackTasks",
+              "value": "={{ String($env.CREATE_FALLBACK_TASKS ?? 'false').trim().toLowerCase() === 'true' }}",
+              "type": "boolean"
+            },
+            {
+              "id": "88136845-4e09-57b6-9757-2b548dcb6c50",
+              "name": "config.updateContacts",
+              "value": "={{ String($env.CREATE_FALLBACK_TASKS ?? 'false').trim().toLowerCase() === 'true' && String($env.UPDATE_CONTACTS ?? 'true').trim().toLowerCase() !== 'false' }}",
+              "type": "boolean"
+            },
+            {
+              "id": "d94968bf-422c-566a-bf15-0901ef8d64d3",
+              "name": "config.logFailureNotes",
+              "value": "={{ String($env.CREATE_FALLBACK_TASKS ?? 'false').trim().toLowerCase() === 'true' && String($env.LOG_FAILURE_NOTES ?? 'true').trim().toLowerCase() !== 'false' }}",
+              "type": "boolean"
+            },
+            {
+              "id": "e7ebf80f-9974-5753-9660-4fd37e2e58f2",
+              "name": "config.sendSlackAlerts",
+              "value": "={{ String($env.SEND_SLACK_ALERTS ?? 'false').trim().toLowerCase() === 'true' }}",
+              "type": "boolean"
+            },
+            {
+              "id": "db68317b-09b3-5e66-9664-ecb2bc40fc8a",
+              "name": "config.defaultSdrEmail",
+              "value": "={{ String($env.DEFAULT_SDR_EMAIL ?? 'sdr.fallback@example.com').trim() || 'sdr.fallback@example.com' }}",
+              "type": "string"
+            },
+            {
+              "id": "4bb0854d-24cf-5ae9-84aa-596c44b461ba",
+              "name": "config.sdrPoolJson",
+              "value": "={{ String($env.SDR_POOL ?? '').trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "293c8efb-133d-5999-9ece-e7caaff7087f",
+              "name": "config.territoryRulesJson",
+              "value": "={{ String($env.TERRITORY_RULES ?? '').trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "d9f20eaa-f674-5690-8232-dad1f20b196a",
+              "name": "config.unavailableEmails",
+              "value": "={{ String($env.SDR_UNAVAILABLE_EMAILS ?? '').split(',').map(x => x.trim()).filter(Boolean) }}",
+              "type": "array"
+            },
+            {
+              "id": "d863f776-6528-5ec9-85ba-dff2c4becefa",
+              "name": "config.preferExistingOwner",
+              "value": "={{ String($env.PREFER_EXISTING_OWNER ?? 'true').trim().toLowerCase() !== 'false' }}",
+              "type": "boolean"
+            },
+            {
+              "id": "b6ca8f47-d8ec-578d-9b2e-7469c507d197",
+              "name": "config.allowNonPoolOwner",
+              "value": "={{ String($env.ALLOW_NON_POOL_OWNER ?? 'false').trim().toLowerCase() === 'true' }}",
+              "type": "boolean"
+            },
+            {
+              "id": "1afe84d6-bd63-571d-968f-7b888a7192a4",
+              "name": "config.defaultMaxDailyFallbacks",
+              "value": "={{ Math.min(1000, Math.max(1, Number.isFinite(parseFloat($env.DEFAULT_MAX_DAILY_FALLBACKS)) ? parseFloat($env.DEFAULT_MAX_DAILY_FALLBACKS) : 25)) }}",
+              "type": "number"
+            },
+            {
+              "id": "5c5c15c0-8cd8-5e7e-81db-fea1def234cb",
+              "name": "config.fallbackCooldownMinutes",
+              "value": "={{ Math.min(10080, Math.max(0, Number.isFinite(parseFloat($env.FALLBACK_COOLDOWN_MINUTES)) ? parseFloat($env.FALLBACK_COOLDOWN_MINUTES) : 60)) }}",
+              "type": "number"
+            },
+            {
+              "id": "2368fbf6-552d-53bc-81ec-3b0a1950704d",
+              "name": "config.taskDueMinutes",
+              "value": "={{ Math.min(1440, Math.max(1, Number.isFinite(parseFloat($env.TASK_DUE_MINUTES)) ? parseFloat($env.TASK_DUE_MINUTES) : 15)) }}",
+              "type": "number"
+            },
+            {
+              "id": "6cbb99b0-81d0-5a6a-a1a8-a1064f6e212f",
+              "name": "config.lifecycleOnFallback",
+              "value": "={{ String($env.LIFECYCLE_ON_FALLBACK ?? 'salesqualifiedlead').trim().toLowerCase() }}",
+              "type": "string"
+            },
+            {
+              "id": "bde0654a-b920-540f-833e-0c9a0dd934ed",
+              "name": "config.contactOwnerPolicy",
+              "value": "={{ ['never', 'fill_empty', 'always'].includes(String($env.CONTACT_OWNER_POLICY ?? 'fill_empty').trim().toLowerCase()) ? String($env.CONTACT_OWNER_POLICY ?? 'fill_empty').trim().toLowerCase() : 'fill_empty' }}",
+              "type": "string"
+            },
+            {
+              "id": "8ac165c7-e5ac-5671-b9ea-d2ca0171cea0",
+              "name": "config.slackIncludeContactDetails",
+              "value": "={{ String($env.SLACK_INCLUDE_CONTACT_DETAILS ?? 'false').trim().toLowerCase() === 'true' }}",
+              "type": "boolean"
+            },
+            {
+              "id": "20b0ad26-336a-5688-85a3-97dc40dd599d",
+              "name": "config.requireSignature",
+              "value": "={{ String($env.REQUIRE_SIGNATURE ?? 'true').trim().toLowerCase() !== 'false' }}",
+              "type": "boolean"
+            },
+            {
+              "id": "852465f1-7bf7-5f5f-895c-50114f65b6fb",
+              "name": "config.signatureToleranceSec",
+              "value": "={{ Math.min(3600, Math.max(30, Number.isFinite(parseFloat($env.SIGNATURE_TOLERANCE_SEC)) ? parseFloat($env.SIGNATURE_TOLERANCE_SEC) : 300)) }}",
+              "type": "number"
+            },
+            {
+              "id": "30f3cfd5-a71b-5b4b-b364-73ac54a87058",
+              "name": "config.chilipiperSignatureHeader",
+              "value": "={{ String($env.CHILIPIPER_SIGNATURE_HEADER ?? 'x-chilipiper-signature').trim().toLowerCase() || 'x-chilipiper-signature' }}",
+              "type": "string"
+            },
+            {
+              "id": "d94a587a-c43b-5e24-954a-ff5492be37a9",
+              "name": "config.chilipiperSignatureMode",
+              "value": "={{ ['hmac', 'token'].includes(String($env.CHILIPIPER_SIGNATURE_MODE ?? 'hmac').trim().toLowerCase()) ? String($env.CHILIPIPER_SIGNATURE_MODE ?? 'hmac').trim().toLowerCase() : 'hmac' }}",
+              "type": "string"
+            },
+            {
+              "id": "6ff2a1fd-5142-5fa1-b8ba-7bb60b1b16e4",
+              "name": "config.calendlyFailureResults",
+              "value": "={{ String($env.CALENDLY_FAILURE_RESULTS ?? 'custom_message,external_url').split(',').map(x => x.trim()).filter(Boolean) }}",
+              "type": "array"
+            },
+            {
+              "id": "122ded23-06aa-5575-a5b3-916c29624b52",
+              "name": "config.eventDedupeHours",
+              "value": "={{ Math.min(720, Math.max(1, Number.isFinite(parseFloat($env.EVENT_DEDUPE_HOURS)) ? parseFloat($env.EVENT_DEDUPE_HOURS) : 48)) }}",
+              "type": "number"
+            },
+            {
+              "id": "ee449595-822a-5e6d-b1a8-957243d7d9c7",
+              "name": "config.maxEventsPerRequest",
+              "value": "={{ Math.min(100, Math.max(1, Number.isFinite(parseFloat($env.MAX_EVENTS_PER_REQUEST)) ? parseFloat($env.MAX_EVENTS_PER_REQUEST) : 50)) }}",
+              "type": "number"
+            },
+            {
+              "id": "53d54a36-e9fb-5e1f-9eb9-d149ecbef66b",
+              "name": "config.webhookPublicUrl",
+              "value": "={{ String($env.WEBHOOK_PUBLIC_URL ?? '').trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "b3825853-ae0b-5076-8a00-539a7b7c9ac9",
+              "name": "config.portalId",
+              "value": "={{ String($env.HUBSPOT_PORTAL_ID ?? '').trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "151a43fe-fbdd-5ed9-a4e8-6e51977f56aa",
+              "name": "config.hubspotBaseUrl",
+              "value": "={{ String($env.HUBSPOT_API_BASE_URL ?? 'https://api.hubapi.com').trim().replace(/\\/+$/, '') || 'https://api.hubapi.com' }}",
+              "type": "string"
+            },
+            {
+              "id": "ebfb0aef-1be5-5689-8ffd-ec44f5d46a36",
+              "name": "config.hubspotUiBaseUrl",
+              "value": "={{ String($env.HUBSPOT_UI_BASE_URL ?? 'https://app.hubspot.com').trim().replace(/\\/+$/, '') || 'https://app.hubspot.com' }}",
+              "type": "string"
+            },
+            {
+              "id": "eedfcb44-b724-5713-b7c6-328d1b5411af",
+              "name": "config.runId",
+              "value": "={{ $execution.id }}",
+              "type": "string"
+            },
+            {
+              "id": "894a3b3a-0e53-5a60-95d8-6236c437450b",
+              "name": "config.executionMode",
+              "value": "={{ $execution.mode }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {
+          "includeBinary": true
+        }
+      },
+      "id": "a1458621-77e4-5076-9498-ff03214a0320",
+      "name": "Config & Safety Gate",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -260,
+        260
+      ],
+      "notes": "Typed, non-secret configuration under config.*; request fields and raw body pass through.",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────────\n// Parse, Verify & Normalize Events\n// 1. Detects the source (?source= query, signature header, or body shape).\n// 2. Verifies authenticity (skipped only in SANDBOX_MODE):\n//      calendly   → Calendly-Webhook-Signature  t=…,v1=HMAC-SHA256(key, `${t}.${raw}`)\n//      chilipiper → CHILIPIPER_SIGNATURE_HEADER: HMAC-SHA256(secret, raw) hex, or static token\n//      hubspot    → X-HubSpot-Signature-v3 (HMAC-SHA256 over method + URI + body + timestamp)\n// 3. Normalizes Chili Piper, Calendly routing-form and HubSpot payloads into\n//    one lead/failure shape, keeps only failed routings, validates emails and\n//    de-duplicates event IDs (in-request and across production executions).\n//\n// Security note: webhook signing secrets are read here, in memory, only because\n// an inbound HMAC cannot be verified in an HTTP Request field. They are never\n// written to node output.\n// ─────────────────────────────────────────────────────────────────────────────\nconst item = $input.first();\nconst req = item.json;\nconst cfg = req.config;\nconst headers = Object.fromEntries(Object.entries(req.headers || {}).map(([k, v]) => [String(k).toLowerCase(), String(v)]));\nconst now = Date.now();\n\n// ── Raw body (needed for exact HMAC) ──────────────────────────────────────\nlet rawBody = null;\nlet rawSource = 'reconstructed';\ntry {\n  const bin = item.binary && item.binary.data;\n  if (bin && bin.data && !String(bin.id || '').length) { rawBody = Buffer.from(bin.data, 'base64').toString('utf8'); rawSource = 'raw'; }\n} catch (e) { rawBody = null; }\nif (rawBody === null) rawBody = typeof req.body === 'string' ? req.body : JSON.stringify(req.body ?? '');\n\nlet body = req.body;\nif (typeof body === 'string') { try { body = JSON.parse(body); } catch (e) { body = null; } }\nif ((body === null || body === undefined || (typeof body === 'object' && !Array.isArray(body) && !Object.keys(body).length)) && rawSource === 'raw') {\n  try { body = JSON.parse(rawBody); } catch (e) { body = null; }\n}\n\n// ── Source detection ──────────────────────────────────────────────────────\nconst q = String(req.query?.source || '').toLowerCase();\nlet source = ['chilipiper', 'calendly', 'hubspot'].includes(q) ? q : null;\nif (!source && headers['calendly-webhook-signature']) source = 'calendly';\nif (!source && headers['x-hubspot-signature-v3']) source = 'hubspot';\nif (!source && headers[cfg.chilipiperSignatureHeader]) source = 'chilipiper';\nif (!source && body && (String(body.event || '').startsWith('routing_form_submission') || body.payload?.routing_form)) source = 'calendly';\nif (!source && body && (body.objectId || body.hs_object_id || body.properties?.email)) source = 'hubspot';\nif (!source) source = 'chilipiper';\n\n// ── Signature verification ────────────────────────────────────────────────\nlet signature = 'skipped (sandbox)';\nif (!cfg.sandboxMode && cfg.requireSignature) {\n  let crypto;\n  try { crypto = require('crypto'); } catch (e) { throw new Error('Signature verification needs NODE_FUNCTION_ALLOW_BUILTIN=crypto.'); }\n  const readSecret = (name) => { try { return String($env[name] || ''); } catch (e) { return ''; } };\n  const safeEq = (a, b) => { const A = Buffer.from(String(a)); const B = Buffer.from(String(b)); return A.length === B.length && crypto.timingSafeEqual(A, B); };\n  const hmac = (key, data, enc) => crypto.createHmac('sha256', key).update(data, 'utf8').digest(enc);\n\n  if (source === 'calendly') {\n    const key = readSecret('CALENDLY_WEBHOOK_SIGNING_KEY');\n    if (!key) throw new Error('Rejected: CALENDLY_WEBHOOK_SIGNING_KEY is not set.');\n    const parts = Object.fromEntries(String(headers['calendly-webhook-signature'] || '').split(',').map((p) => p.split('=').map((s) => s.trim())));\n    if (!parts.t || !parts.v1) throw new Error('Rejected: missing Calendly-Webhook-Signature header.');\n    if (Math.abs(now / 1000 - Number(parts.t)) > cfg.signatureToleranceSec) throw new Error('Rejected: Calendly signature timestamp outside tolerance (possible replay).');\n    if (!safeEq(parts.v1, hmac(key, `${parts.t}.${rawBody}`, 'hex'))) throw new Error('Rejected: Calendly signature mismatch.');\n  } else if (source === 'hubspot') {\n    const secret = readSecret('HUBSPOT_APP_CLIENT_SECRET');\n    const sig = headers['x-hubspot-signature-v3'];\n    const ts = headers['x-hubspot-request-timestamp'];\n    if (!secret || !sig || !ts) throw new Error('Rejected: HubSpot v3 signature, timestamp or HUBSPOT_APP_CLIENT_SECRET missing.');\n    if (Math.abs(now - Number(ts)) > cfg.signatureToleranceSec * 1000) throw new Error('Rejected: HubSpot timestamp outside tolerance.');\n    if (!safeEq(sig, hmac(secret, `POST${cfg.webhookPublicUrl || req.webhookUrl}${rawBody}${ts}`, 'base64'))) throw new Error('Rejected: HubSpot v3 signature mismatch.');\n  } else {\n    const secret = readSecret('CHILIPIPER_WEBHOOK_SECRET');\n    if (!secret) throw new Error('Rejected: CHILIPIPER_WEBHOOK_SECRET is not set.');\n    const provided = String(headers[cfg.chilipiperSignatureHeader] || '').replace(/^sha256=/i, '');\n    if (!provided) throw new Error(`Rejected: missing ${cfg.chilipiperSignatureHeader} header.`);\n    const ok = cfg.chilipiperSignatureMode === 'token' ? safeEq(provided, secret) : safeEq(provided.toLowerCase(), hmac(secret, rawBody, 'hex'));\n    if (!ok) throw new Error('Rejected: Chili Piper signature mismatch.');\n  }\n  signature = `verified (${source}, ${rawSource} body)`;\n} else if (!cfg.sandboxMode) {\n  signature = 'disabled (REQUIRE_SIGNATURE=false)';\n}\n\n// ── Normalisation helpers ─────────────────────────────────────────────────\nconst pick = (...vals) => { for (const v of vals) if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim(); return null; };\nconst clean = (v, max) => (v === null ? null : String(v).replace(/[\\u0000-\\u001F\\u007F<>]/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, max));\nconst EMAIL_RE = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,63}$/i;\nconst FAILURE_RE = /(fail|no[_ .-]?match|not[_ .-]?booked|no[_ .-]?availab|abandon|timeout|error|unrouted|no[_ .-]?rep|dropped)/i;\nconst SUCCESS_RE = /(booked|scheduled|routed[_ .-]?success|completed)/i;\n\nfunction fromChiliPiper(e) {\n  const lead = e.lead || e.prospect || e.guest || e.contact || e.invitee || {};\n  const f = e.formData || e.fields || e.answers || {};\n  const type = pick(e.event, e.type, e.eventType, e.name) || '';\n  const status = pick(e.routing?.status, e.status, e.outcome) || '';\n  const failed = FAILURE_RE.test(type) || FAILURE_RE.test(status);\n  const succeeded = !failed && (SUCCESS_RE.test(type) || SUCCESS_RE.test(status));\n  return {\n    eventId: pick(e.id, e.eventId, e.uuid, e.requestId),\n    type: type || status || 'unknown',\n    failed: failed || (!succeeded && Boolean(pick(e.reason, e.failureReason, e.routing?.reason, e.error?.message))),\n    reason: pick(e.routing?.reason, e.failureReason, e.reason, e.error?.message, e.error?.code, status, type),\n    occurredAt: pick(e.occurredAt, e.timestamp, e.createdAt, e.created_at),\n    meetingLink: pick(e.meetingUrl, e.bookingUrl, e.rescheduleUrl, e.schedulingLink, e.link),\n    routerName: pick(e.routerName, e.router?.name, e.queue?.name, e.queue),\n    lead: {\n      firstName: pick(lead.firstName, lead.first_name, lead.firstname, f.firstName, f.first_name, f.FirstName),\n      lastName: pick(lead.lastName, lead.last_name, lead.lastname, f.lastName, f.last_name, f.LastName),\n      email: pick(lead.email, lead.workEmail, f.email, f.Email),\n      company: pick(lead.company, lead.companyName, lead.company_name, f.company, f.Company),\n      phone: pick(lead.phone, lead.phoneNumber, f.phone, f.Phone),\n      country: pick(lead.country, lead.countryCode, f.country, f.Country),\n      state: pick(lead.state, lead.region, f.state, f.State),\n      companySize: pick(lead.companySize, lead.employees, f.companySize, f.employees),\n    },\n  };\n}\nfunction fromCalendly(e) {\n  const p = e.payload || {};\n  const qa = Array.isArray(p.questions_and_answers) ? p.questions_and_answers : [];\n  const ans = (re) => { const hit = qa.find((x) => re.test(String(x.question || ''))); return hit ? pick(hit.answer) : null; };\n  const resultType = pick(p.result?.type) || 'unknown';\n  return {\n    eventId: pick(p.uri, e.id),\n    type: `${pick(e.event) || 'calendly'}:${resultType}`,\n    failed: String(e.event || '').startsWith('routing_form_submission') && cfg.calendlyFailureResults.includes(resultType),\n    reason: `routing_result_${resultType}`,\n    occurredAt: pick(p.created_at, e.created_at),\n    meetingLink: resultType === 'external_url' ? pick(p.result?.value) : null,\n    routerName: pick(p.routing_form),\n    lead: {\n      firstName: ans(/first\\s*name/i), lastName: ans(/last\\s*name|surname/i), email: ans(/e-?mail/i), company: ans(/company|organi[sz]ation/i),\n      phone: ans(/phone|mobile/i), country: ans(/country/i), state: ans(/state|province|region/i), companySize: ans(/employees|company size/i),\n    },\n  };\n}\nfunction fromHubSpot(e) {\n  const pr = e.properties || e.contact || e;\n  return {\n    eventId: pick(e.eventId, e.id, e.objectId ? `hs-${e.objectId}-${pick(e.occurredAt, e.timestamp) || ''}` : null),\n    type: pick(e.subscriptionType, e.type, 'hubspot.fallback_requested'),\n    failed: true,\n    reason: pick(e.reason, pr.routing_failure_reason, pr.routing_fallback_reason, 'hubspot_fallback_requested'),\n    occurredAt: pick(e.occurredAt, e.timestamp),\n    meetingLink: pick(pr.meeting_link, e.meetingLink),\n    routerName: pick(e.workflowName, 'HubSpot workflow'),\n    lead: {\n      firstName: pick(pr.firstname, pr.firstName), lastName: pick(pr.lastname, pr.lastName), email: pick(pr.email), company: pick(pr.company),\n      phone: pick(pr.phone, pr.mobilephone), country: pick(pr.country), state: pick(pr.state), companySize: pick(pr.numberofemployees),\n    },\n    hubspotContactId: pick(e.objectId, pr.hs_object_id),\n  };\n}\n\n// ── Normalise, filter, de-duplicate ───────────────────────────────────────\nconst rawEvents = Array.isArray(body) ? body : body ? [body] : [];\nconst counters = { received: rawEvents.length, notFailure: 0, invalidEmail: 0, duplicateInRequest: 0, replayed: 0, overCap: 0, accepted: 0 };\nconst rejected = [];\nlet store = null;\ntry { store = $getWorkflowStaticData('global'); } catch (e) { store = null; }\nif (store) {\n  store.seenEvents = store.seenEvents || {};\n  for (const [k, t] of Object.entries(store.seenEvents)) if (now - t > cfg.eventDedupeHours * 3600000) delete store.seenEvents[k];\n}\n\nconst seen = new Set();\nconst events = [];\nfor (const raw of rawEvents) {\n  const n = source === 'calendly' ? fromCalendly(raw) : source === 'hubspot' ? fromHubSpot(raw) : fromChiliPiper(raw);\n  n.eventId = clean(n.eventId || `${source}-${n.lead.email}-${n.occurredAt || now}`, 200);\n  if (!n.failed) { counters.notFailure += 1; continue; }\n  const email = (n.lead.email || '').toLowerCase();\n  if (!EMAIL_RE.test(email)) { counters.invalidEmail += 1; rejected.push({ eventId: n.eventId, reason: 'invalid_email' }); continue; }\n  if (seen.has(n.eventId)) { counters.duplicateInRequest += 1; continue; }\n  seen.add(n.eventId);\n  if (store && !cfg.sandboxMode && store.seenEvents[n.eventId]) { counters.replayed += 1; continue; }\n  if (events.length >= cfg.maxEventsPerRequest) { counters.overCap += 1; continue; }\n\n  events.push({\n    eventId: n.eventId,\n    source,\n    type: clean(n.type, 80),\n    reason: clean(n.reason, 120) || 'unspecified',\n    occurredAt: n.occurredAt && !Number.isNaN(Date.parse(n.occurredAt)) ? new Date(Date.parse(n.occurredAt)).toISOString() : new Date(now).toISOString(),\n    meetingLink: n.meetingLink && /^https:\\/\\//i.test(n.meetingLink) ? clean(n.meetingLink, 500) : null,\n    routerName: clean(n.routerName, 120),\n    hubspotContactId: n.hubspotContactId || null,\n    lead: {\n      firstName: clean(n.lead.firstName, 80), lastName: clean(n.lead.lastName, 80), email,\n      company: clean(n.lead.company, 160), phone: clean(n.lead.phone, 40),\n      country: n.lead.country ? clean(n.lead.country, 60).toUpperCase() : null, state: n.lead.state ? clean(n.lead.state, 60).toUpperCase() : null,\n      companySize: clean(n.lead.companySize, 40),\n    },\n  });\n}\nif (store && !cfg.sandboxMode) for (const e of events) store.seenEvents[e.eventId] = now;\ncounters.accepted = events.length;\n\nreturn [{ json: { source, signature, rawBodySource: rawSource, counters, rejected, events } }];\n"
+      },
+      "id": "c96e3113-c0f4-5575-b404-1622d4325228",
+      "name": "Parse, Verify & Normalize Events",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -40,
+        260
+      ],
+      "notes": "Source detection, signature verification, normalisation, failure filter, de-duplication.",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "4f04c524-5a0c-5304-a2a9-d54917368a4a",
+              "leftValue": "={{ $json.events.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9e819ed1-a33a-5284-93c4-4714c7d97e1b",
+      "name": "Has Fallback Events?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        180,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "a43527ca-58ce-5d01-8c74-9dfe74b971b2",
+              "leftValue": "={{ $('Config & Safety Gate').first().json.config.sandboxMode }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a6d6dc6a-e3b1-5f5c-914c-177bbe221148",
+      "name": "Sandbox Mode?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        400,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────────\n// Mock HubSpot Context (SANDBOX_MODE=true)\n// Fictitious HubSpot contacts (matched by email) and active owners, in the\n// same shape \"Assemble Routing Context\" emits on the live path.\n// ─────────────────────────────────────────────────────────────────────────────\nconst parsed = $('Parse, Verify & Normalize Events').first().json;\nconst MIN_MS = 60 * 1000;\nconst ago = (m) => new Date(Date.now() - m * MIN_MS).toISOString();\n\nconst CONTACTS = {\n  'alex@company.example': { id: '9100000001', properties: { email: 'alex@company.example', firstname: 'Alex', lastname: 'Miller', company: 'Company Example Ltd', phone: null, lifecyclestage: 'lead', hubspot_owner_id: '83000002', routing_fallback_at: null } },\n  'morgan@company.example': { id: '9100000004', properties: { email: 'morgan@company.example', firstname: 'Morgan', lastname: 'Diaz', company: 'Company Example Ltd', phone: null, lifecyclestage: 'marketingqualifiedlead', hubspot_owner_id: null, routing_fallback_at: ago(20) } },\n};\nconst owners = [\n  { id: '83000001', email: 'sdr.east.one@example.com', firstName: 'Riley', lastName: 'East', archived: false },\n  { id: '83000002', email: 'sdr.east.two@example.com', firstName: 'Casey', lastName: 'Harbor', archived: false },\n  { id: '83000003', email: 'sdr.emea.one@example.com', firstName: 'Noor', lastName: 'Atlas', archived: false },\n  { id: '83000004', email: 'sdr.pool.one@example.com', firstName: 'Jordan', lastName: 'Pool', archived: false },\n  { id: '83000009', email: 'sdr.fallback@example.com', firstName: 'Fallback', lastName: 'Desk', archived: false },\n];\n\nconst contacts = {};\nfor (const e of parsed.events) if (CONTACTS[e.lead.email]) contacts[e.lead.email] = CONTACTS[e.lead.email];\nreturn [{ json: { source: 'synthetic-fixtures', contacts, owners } }];\n"
+      },
+      "id": "dfbdd6cc-7305-50ce-a410-ebe0de862ee5",
+      "name": "Mock HubSpot Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        620,
+        40
+      ],
+      "notes": "Fictitious contacts and active owners.",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config & Safety Gate').first().json.config.hubspotBaseUrl }}/crm/v3/objects/contacts/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUBSPOT_PRIVATE_APP_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ filterGroups: [{ filters: [{ propertyName: 'email', operator: 'IN', values: $('Parse, Verify & Normalize Events').first().json.events.map(e => e.lead.email).slice(0, 100) }] }], properties: ['email', 'firstname', 'lastname', 'company', 'phone', 'country', 'state', 'lifecyclestage', 'hubspot_owner_id', 'routing_fallback_at', 'routing_fallback_status'], limit: 100 }) }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "3e2e027c-e31e-51a0-a2a6-4780be67f129",
+      "name": "HubSpot: Find Contacts by Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        620,
+        260
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "notes": "Existing contacts for owner continuity, cooldown and safe field filling. Scope: crm.objects.contacts.read.",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Config & Safety Gate').first().json.config.hubspotBaseUrl }}/crm/v3/owners",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUBSPOT_PRIVATE_APP_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "500"
+            },
+            {
+              "name": "archived",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "6c1b192e-faa9-512f-946f-40abe8574d53",
+      "name": "HubSpot: List Active Owners",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        840,
+        260
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "notes": "Active owners = assignable SDRs. Scope: crm.objects.owners.read.",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────────\n// Assemble Routing Context\n// Joins the HubSpot contact search (by email) and the active owners list into\n// the same shape the sandbox emits.\n// ─────────────────────────────────────────────────────────────────────────────\nconst contacts = {};\nfor (const item of $('HubSpot: Find Contacts by Email').all()) {\n  for (const r of Array.isArray(item.json.results) ? item.json.results : []) {\n    const email = String(r.properties?.email || '').toLowerCase();\n    if (email && !contacts[email]) contacts[email] = { id: String(r.id), properties: r.properties };\n  }\n}\nconst owners = [];\nfor (const item of $input.all()) {\n  for (const o of Array.isArray(item.json.results) ? item.json.results : []) {\n    if (o.archived === true) continue;\n    owners.push({ id: String(o.id), email: String(o.email || '').toLowerCase(), firstName: o.firstName || null, lastName: o.lastName || null, archived: false });\n  }\n}\nreturn [{ json: { source: 'hubspot', contacts, owners } }];\n"
+      },
+      "id": "14da3c9a-bb63-5456-bba3-b6f5ff4f689f",
+      "name": "Assemble Routing Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1060,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────────\n// Active SDR Round-Robin Router\n// For every failed routing event:\n//   0. cooldown        → suppress if the contact already had a fallback within\n//                        FALLBACK_COOLDOWN_MINUTES (retries, double submits)\n//   1. existing_owner  → keep an active owner who is in the SDR pool\n//   2. territory_rr    → weighted round-robin among active SDRs of the lead's\n//                        territory (TERRITORY_RULES), honouring daily capacity\n//   3. default_pool_rr → weighted round-robin among SDRs tagged \"default\" / \"*\"\n//   4. default_sdr     → DEFAULT_SDR_EMAIL\n// \"Active\" means: a non-archived HubSpot owner, not listed in\n// SDR_UNAVAILABLE_EMAILS. Cursors and daily counts persist in workflow static\n// data for production executions.\n// ─────────────────────────────────────────────────────────────────────────────\nconst cfg = $('Config & Safety Gate').first().json.config;\nconst parsed = $('Parse, Verify & Normalize Events').first().json;\nconst ctx = $input.first().json;\nconst now = Date.now();\nconst today = new Date(now).toISOString().slice(0, 10);\n\nconst SANDBOX_POOL = [\n  { email: 'sdr.east.one@example.com', territories: ['US-East'], weight: 1, maxDailyFallbacks: 20, slackUserId: 'U0SYNEAST1' },\n  { email: 'sdr.east.two@example.com', territories: ['US-East'], weight: 1, maxDailyFallbacks: 20, slackUserId: 'U0SYNEAST2' },\n  { email: 'sdr.emea.one@example.com', territories: ['EMEA'], weight: 1, maxDailyFallbacks: 20 },\n  { email: 'sdr.pool.one@example.com', territories: ['default', 'US-West'], weight: 2, maxDailyFallbacks: 30 },\n];\nconst SANDBOX_TERRITORIES = [\n  { name: 'US-East', countries: ['US', 'USA', 'UNITED STATES'], states: ['NY', 'NJ', 'MA', 'PA', 'CT', 'VA', 'FL', 'GA', 'NC'] },\n  { name: 'US-West', countries: ['US', 'USA', 'UNITED STATES'], states: ['CA', 'WA', 'OR', 'NV', 'AZ', 'CO', 'UT'] },\n  { name: 'EMEA', countries: ['GB', 'UK', 'DE', 'FR', 'NL', 'IE', 'ES', 'IT', 'SE', 'AE', 'ZA'] },\n];\nconst parseJson = (s, fallback, label) => {\n  if (!s) return fallback;\n  try { const v = JSON.parse(s); return Array.isArray(v) ? v : fallback; } catch (e) { throw new Error(`${label} is not valid JSON.`); }\n};\nconst pool = parseJson(cfg.sdrPoolJson, cfg.sandboxMode ? SANDBOX_POOL : [], 'SDR_POOL')\n  .map((p) => ({ email: String(p.email || '').toLowerCase(), territories: (p.territories || ['default']).map(String), weight: Math.max(1, Math.min(10, Number(p.weight) || 1)), maxDailyFallbacks: Number(p.maxDailyFallbacks) || cfg.defaultMaxDailyFallbacks, slackUserId: p.slackUserId || null }))\n  .filter((p) => p.email);\nconst territories = parseJson(cfg.territoryRulesJson, cfg.sandboxMode ? SANDBOX_TERRITORIES : [], 'TERRITORY_RULES')\n  .map((t) => ({ name: String(t.name), countries: (t.countries || []).map((c) => String(c).toUpperCase()), states: (t.states || []).map((s) => String(s).toUpperCase()) }));\n\nconst ownersByEmail = new Map(ctx.owners.map((o) => [o.email, o]));\nconst ownersById = new Map(ctx.owners.map((o) => [o.id, o]));\nconst unavailable = new Set(cfg.unavailableEmails.map((e) => e.toLowerCase()));\nconst isActive = (email) => ownersByEmail.has(email) && !unavailable.has(email);\nconst activePool = pool.filter((p) => isActive(p.email));\nconst inactivePool = pool.filter((p) => !isActive(p.email)).map((p) => ({ email: p.email, reason: unavailable.has(p.email) ? 'unavailable' : 'not_an_active_owner' }));\n\nlet store = null;\ntry { store = $getWorkflowStaticData('global'); } catch (e) { store = null; }\n// Sandbox runs use a throwaway state so synthetic events never move production cursors or counts.\nconst state = store && !cfg.sandboxMode ? store : {};\nstate.rr = state.rr || {};\nstate.daily = state.daily && state.daily.date === today ? state.daily : { date: today, counts: {} };\nconst counts = state.daily.counts;\n\nfunction territoryFor(lead) {\n  const country = String(lead.country || '').toUpperCase();\n  const st = String(lead.state || '').toUpperCase();\n  const t = territories.find((r) => r.countries.includes(country) && (!r.states.length || r.states.includes(st)));\n  return t ? t.name : 'default';\n}\nfunction roundRobin(key, candidates) {\n  const ring = candidates.flatMap((c) => Array(c.weight).fill(c));\n  if (!ring.length) return null;\n  const start = Number(state.rr[key] || 0) % ring.length;\n  for (let i = 0; i < ring.length; i += 1) {\n    const c = ring[(start + i) % ring.length];\n    if ((counts[c.email] || 0) < c.maxDailyFallbacks) { state.rr[key] = (start + i + 1) % ring.length; return c; }\n  }\n  return null;\n}\n\nconst results = parsed.events.map((e) => {\n  const contact = ctx.contacts[e.lead.email] || null;\n  const cp = contact ? contact.properties : {};\n  const lastFallbackMs = Date.parse(cp.routing_fallback_at || '');\n  if (Number.isFinite(lastFallbackMs) && now - lastFallbackMs < cfg.fallbackCooldownMinutes * 60000) {\n    return { ...e, contact, territory: null, assignment: null, outcome: 'suppressed_cooldown', note: `previous fallback ${Math.round((now - lastFallbackMs) / 60000)} min ago` };\n  }\n\n  const territory = territoryFor(e.lead);\n  let chosen = null;\n  let rule = null;\n\n  const existing = cp.hubspot_owner_id ? ownersById.get(String(cp.hubspot_owner_id)) : null;\n  if (cfg.preferExistingOwner && existing && isActive(existing.email) && (cfg.allowNonPoolOwner || activePool.some((p) => p.email === existing.email))) {\n    chosen = activePool.find((p) => p.email === existing.email) || { email: existing.email, slackUserId: null, maxDailyFallbacks: Infinity };\n    rule = 'existing_owner';\n  }\n  if (!chosen) {\n    const c = roundRobin(`t:${territory}`, activePool.filter((p) => p.territories.includes(territory) || p.territories.includes('*')));\n    if (c) { chosen = c; rule = territory === 'default' ? 'default_pool_round_robin' : 'territory_round_robin'; }\n  }\n  if (!chosen && territory !== 'default') {\n    const c = roundRobin('t:default', activePool.filter((p) => p.territories.includes('default') || p.territories.includes('*')));\n    if (c) { chosen = c; rule = 'default_pool_round_robin'; }\n  }\n  if (!chosen) {\n    const fallback = cfg.defaultSdrEmail.toLowerCase();\n    chosen = { email: fallback, slackUserId: null, maxDailyFallbacks: Infinity };\n    rule = 'default_sdr';\n  }\n\n  const owner = ownersByEmail.get(chosen.email) || null;\n  counts[chosen.email] = (counts[chosen.email] || 0) + 1;\n  return {\n    ...e,\n    contact,\n    territory,\n    assignment: { sdrEmail: chosen.email, ownerId: owner ? owner.id : null, sdrName: owner ? [owner.firstName, owner.lastName].filter(Boolean).join(' ') : null, slackUserId: chosen.slackUserId || null, rule },\n    outcome: owner ? 'assigned' : 'unassigned_owner_not_found',\n  };\n});\n\nreturn [{\n  json: {\n    results,\n    routing: {\n      poolSize: pool.length,\n      activePool: activePool.map((p) => p.email),\n      inactivePool,\n      territories: territories.map((t) => t.name),\n      dailyCounts: { ...counts },\n      persisted: Boolean(store) && !cfg.sandboxMode && cfg.executionMode === 'production',\n    },\n  },\n}];\n"
+      },
+      "id": "af9bfbca-46ea-54a6-afd3-dd47bff4cc0a",
+      "name": "Active SDR Round-Robin Router",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1280,
+        160
+      ],
+      "notes": "Cooldown → existing owner → territory RR → default pool RR → default SDR.",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────────\n// Compose Fallback Payloads\n// Builds the HubSpot contact upsert (by email), the fallback task and failure\n// note drafts (associated after the upsert returns contact IDs), and the Slack\n// alert. Existing contact data is never overwritten: identity fields are only\n// sent when blank in HubSpot, lifecycle stage only moves forward, and the\n// contact owner is only set when empty (CONTACT_OWNER_POLICY).\n// ─────────────────────────────────────────────────────────────────────────────\nconst cfg = $('Config & Safety Gate').first().json.config;\nconst { results, routing } = $input.first().json;\nconst nowIso = new Date().toISOString();\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\nconst blank = (v) => v === null || v === undefined || String(v).trim() === '';\nconst LIFECYCLE = ['subscriber', 'lead', 'marketingqualifiedlead', 'salesqualifiedlead', 'opportunity', 'customer', 'evangelist'];\nconst RULE_LABEL = { existing_owner: 'existing owner', territory_round_robin: 'territory round-robin', default_pool_round_robin: 'default pool round-robin', default_sdr: 'default SDR' };\n\nconst actionable = results.filter((r) => r.outcome !== 'suppressed_cooldown');\nconst dueIso = new Date(Date.now() + cfg.taskDueMinutes * 60000).toISOString();\nconst fullName = (l) => [l.firstName, l.lastName].filter(Boolean).join(' ') || l.email;\n\n// ── Contact upserts ───────────────────────────────────────────────────────\nconst upserts = actionable.map((r) => {\n  const ex = r.contact ? r.contact.properties : {};\n  const isNew = !r.contact;\n  const props = { email: r.lead.email };\n  for (const [hs, val] of [['firstname', r.lead.firstName], ['lastname', r.lead.lastName], ['company', r.lead.company], ['phone', r.lead.phone], ['country', r.lead.country], ['state', r.lead.state]]) {\n    if (!blank(val) && (isNew || blank(ex[hs]))) props[hs] = val;\n  }\n  if (cfg.updateContacts) {\n    Object.assign(props, {\n      routing_fallback_status: 'pending_sdr_followup',\n      routing_fallback_reason: r.reason,\n      routing_fallback_source: r.source,\n      routing_fallback_at: nowIso,\n      routing_fallback_sdr_email: r.assignment.sdrEmail,\n      routing_fallback_event_id: r.eventId,\n    });\n    const target = cfg.lifecycleOnFallback;\n    if (target && LIFECYCLE.includes(target) && LIFECYCLE.indexOf(String(ex.lifecyclestage || '')) < LIFECYCLE.indexOf(target)) props.lifecyclestage = target;\n    if (r.assignment.ownerId && (cfg.contactOwnerPolicy === 'always' || (cfg.contactOwnerPolicy === 'fill_empty' && blank(ex.hubspot_owner_id)))) props.hubspot_owner_id = r.assignment.ownerId;\n  }\n  return { idProperty: 'email', id: r.lead.email, properties: props, _isNew: isNew };\n});\n\n// ── Task and note drafts (contact association added after the upsert) ────\nconst taskDrafts = cfg.createFallbackTasks ? actionable.map((r) => {\n  const l = r.lead;\n  const properties = {\n    hs_timestamp: dueIso,\n    hs_task_subject: `⚡ Routing fallback: contact ${fullName(l)}${l.company ? ` (${l.company})` : ''} now`.slice(0, 250),\n    hs_task_body: [\n      `<p><strong>Instant routing failed. This lead expected a live handoff.</strong></p>`,\n      `<ul><li>Reason: ${esc(r.reason)}</li><li>Source: ${esc(r.source)}${r.routerName ? ` / ${esc(r.routerName)}` : ''}</li><li>Failed at: ${esc(r.occurredAt)}</li>`,\n      `<li>Assigned via: ${esc(RULE_LABEL[r.assignment.rule])}${r.territory ? ` (territory ${esc(r.territory)})` : ''}</li>`,\n      l.companySize ? `<li>Company size: ${esc(l.companySize)}</li>` : '',\n      r.meetingLink ? `<li>Meeting link: <a href=\"${esc(r.meetingLink)}\">${esc(r.meetingLink)}</a></li>` : '',\n      '</ul><p><em>Suggested play: call within the SLA, acknowledge the scheduling issue, and book the meeting directly from your calendar.</em></p>',\n      `<p><em>n8n-chilipiper-hubspot-instant-routing-fallback-handler (dhRobin Systems), event ${esc(r.eventId)}, run ${esc(cfg.runId)}.</em></p>`,\n    ].join(''),\n    hs_task_status: 'NOT_STARTED',\n    hs_task_priority: 'HIGH',\n    hs_task_type: 'CALL',\n  };\n  if (r.assignment.ownerId) properties.hubspot_owner_id = r.assignment.ownerId;\n  return { email: l.email, properties };\n}) : [];\n\nconst noteDrafts = cfg.createFallbackTasks && cfg.logFailureNotes ? actionable.map((r) => ({\n  email: r.lead.email,\n  properties: {\n    hs_timestamp: nowIso,\n    hs_note_body: `<p><strong>Routing fallback logged</strong></p><p>Source: ${esc(r.source)} · Event: ${esc(r.eventId)} · Type: ${esc(r.type)}<br>Reason: ${esc(r.reason)}<br>Assigned SDR: ${esc(r.assignment.sdrEmail)} via ${esc(RULE_LABEL[r.assignment.rule])}${r.outcome !== 'assigned' ? ' (owner not found in HubSpot; task unassigned)' : ''}</p>`,\n  },\n})) : [];\n\n// ── Slack alert ───────────────────────────────────────────────────────────\nconst clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);\nconst mention = (a) => (a.slackUserId ? `<@${a.slackUserId}>` : a.sdrName || a.sdrEmail);\nconst contactLink = (r) => (cfg.portalId && r.contact ? `${cfg.hubspotUiBaseUrl}/contacts/${cfg.portalId}/record/0-1/${r.contact.id}` : null);\nconst leadBlocks = actionable.slice(0, 10).flatMap((r) => {\n  const l = r.lead;\n  const details = cfg.slackIncludeContactDetails ? `\\n${l.email}${l.phone ? ` · ${l.phone}` : ''}` : '';\n  const warn = r.outcome !== 'assigned' ? '\\n:warning: *Assigned SDR is not an active HubSpot owner; the task is unassigned.*' : '';\n  const blocks = [{\n    type: 'section',\n    text: { type: 'mrkdwn', text: clip(`*${fullName(l).replace(/[<>|*_~`]/g, '')}*${l.company ? ` · ${l.company.replace(/[<>|*_~`]/g, '')}` : ''}${details}\\nReason: \\`${r.reason}\\` · Source: ${r.source}${r.territory ? ` · Territory: ${r.territory}` : ''}\\nAssigned to ${mention(r.assignment)} via ${RULE_LABEL[r.assignment.rule]} · due in ${cfg.taskDueMinutes} min${warn}`, 2900) },\n  }];\n  const buttons = [];\n  if (contactLink(r)) buttons.push({ type: 'button', text: { type: 'plain_text', text: 'Open contact' }, url: contactLink(r) });\n  if (r.meetingLink) buttons.push({ type: 'button', text: { type: 'plain_text', text: 'Meeting link' }, url: r.meetingLink });\n  if (buttons.length) blocks.push({ type: 'actions', elements: buttons });\n  return blocks;\n});\nconst unassigned = actionable.filter((r) => r.outcome !== 'assigned').length;\nconst slackPayload = {\n  text: `Routing fallback: ${actionable.length} lead(s) need an SDR now`,\n  blocks: [\n    { type: 'header', text: { type: 'plain_text', text: `⚡ Instant routing failed: ${actionable.length} lead${actionable.length === 1 ? '' : 's'} reassigned` } },\n    { type: 'context', elements: [{ type: 'mrkdwn', text: `${cfg.sandboxMode ? 'SANDBOX' : 'LIVE'} · ${cfg.dryRun ? 'DRY RUN' : cfg.createFallbackTasks ? 'tasks created' : 'tasks disabled'} · active SDRs ${routing.activePool.length}/${routing.poolSize}${unassigned ? ` · :warning: ${unassigned} unassigned` : ''}` }] },\n    { type: 'divider' },\n    ...leadBlocks,\n    ...(actionable.length > 10 ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: `+${actionable.length - 10} more. See HubSpot (routing_fallback_status = pending_sdr_followup).` }] }] : []),\n    { type: 'context', elements: [{ type: 'mrkdwn', text: `n8n-chilipiper-hubspot-instant-routing-fallback-handler · run ${cfg.runId}` }] },\n  ],\n};\n\nreturn [{\n  json: {\n    dryRun: cfg.dryRun,\n    createFallbackTasks: cfg.createFallbackTasks,\n    sendSlackAlerts: cfg.sendSlackAlerts,\n    counts: { events: results.length, actionable: actionable.length, suppressed: results.length - actionable.length, unassigned, upserts: upserts.length, tasks: taskDrafts.length, notes: noteDrafts.length },\n    upsertBody: { inputs: upserts.map(({ _isNew, ...u }) => u) },\n    taskDrafts,\n    noteDrafts,\n    slackPayload,\n    routing,\n    outcomes: results.map((r) => ({ eventId: r.eventId, email: r.lead.email, outcome: r.outcome, rule: r.assignment?.rule || null, sdrEmail: r.assignment?.sdrEmail || null, territory: r.territory, reason: r.reason, existingContact: Boolean(r.contact), note: r.note || null })),\n  },\n}];\n"
+      },
+      "id": "80906e8b-76bb-594c-86b0-fc673cbc6854",
+      "name": "Compose Fallback Payloads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        160
+      ],
+      "notes": "Safe contact upsert, task and note drafts, Slack alert.",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "7158a2d6-18b5-5ca2-ab41-ae03009dbbfd",
+              "leftValue": "={{ $json.dryRun }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a7033257-2d71-59c4-a562-bd00749406a7",
+      "name": "Dry Run?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1720,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "dabe2348-91fa-5e3b-80e1-398085c96add",
+              "leftValue": "={{ $json.createFallbackTasks }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "370d81df-2a39-5eed-8d52-83c4c7d81ca2",
+              "leftValue": "={{ $json.counts.actionable }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "023c3702-906a-5a0a-b593-9827773f6870",
+      "name": "Create Fallback Tasks?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config & Safety Gate').first().json.config.hubspotBaseUrl }}/crm/v3/objects/contacts/batch/upsert",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUBSPOT_PRIVATE_APP_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.upsertBody) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "4eec95c8-d2fb-5015-9fdf-99fa9883d654",
+      "name": "HubSpot: Upsert Contacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        160
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "notes": "Batch upsert by email: creates unknown leads, fills blanks, sets routing_fallback_* (UPDATE_CONTACTS). Scope: crm.objects.contacts.write.",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────────\n// Attach Contact IDs to Tasks & Notes\n// Maps the upsert response (email → contact ID) onto the task and note drafts\n// and adds the HubSpot-defined associations (task→contact 204,\n// note→contact 202). Drafts whose contact could not be resolved are dropped\n// and reported.\n// ─────────────────────────────────────────────────────────────────────────────\nconst composed = $('Compose Fallback Payloads').first().json;\nconst idByEmail = new Map();\nlet created = 0;\nfor (const item of $input.all()) {\n  for (const r of Array.isArray(item.json.results) ? item.json.results : []) {\n    const email = String(r.properties?.email || r.id || '').toLowerCase();\n    if (r.id && email) idByEmail.set(email, String(r.id));\n    if (r.new === true) created += 1;\n  }\n}\nconst withAssoc = (drafts, typeId) => drafts\n  .filter((d) => idByEmail.has(d.email))\n  .map((d) => ({ properties: d.properties, associations: [{ to: { id: idByEmail.get(d.email) }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: typeId }] }] }));\n\nconst tasks = withAssoc(composed.taskDrafts, 204);\nconst notes = withAssoc(composed.noteDrafts, 202);\nreturn [{\n  json: {\n    contactsResolved: idByEmail.size,\n    contactsCreated: created,\n    unresolvedEmails: composed.taskDrafts.filter((d) => !idByEmail.has(d.email)).map((d) => d.email),\n    taskBody: { inputs: tasks },\n    noteBody: { inputs: notes },\n  },\n}];\n"
+      },
+      "id": "5b2ae0de-e668-56c4-9f68-7194d665257b",
+      "name": "Attach Contact IDs to Tasks & Notes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2380,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config & Safety Gate').first().json.config.hubspotBaseUrl }}/crm/v3/objects/tasks/batch/create",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUBSPOT_PRIVATE_APP_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.taskBody) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "92f7654a-8e57-5f13-9d71-d7b6fbe47fa5",
+      "name": "HubSpot: Batch Create Fallback Tasks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2600,
+        160
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "notes": "HIGH-priority CALL tasks, due in TASK_DUE_MINUTES, associated to the contact (204).",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "f664d5a9-6e01-5a1d-8f2b-fb230046eeeb",
+              "leftValue": "={{ $('Attach Contact IDs to Tasks & Notes').first().json.noteBody.inputs.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "6f2464ce-2ab7-5e4e-8849-bbdb2d7b0bfe",
+      "name": "Log Failure Notes?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2820,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config & Safety Gate').first().json.config.hubspotBaseUrl }}/crm/v3/objects/notes/batch/create",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.HUBSPOT_PRIVATE_APP_TOKEN }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Attach Contact IDs to Tasks & Notes').first().json.noteBody) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "865bd930-c7b5-5aa7-a274-955f6ca7a5ca",
+      "name": "HubSpot: Batch Create Failure Notes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3040,
+        80
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "notes": "Failure audit note on the contact timeline (202).",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "d00ede8e-eca8-5291-abf0-c82c6d248d6e",
+              "leftValue": "={{ $('Compose Fallback Payloads').first().json.sendSlackAlerts }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "343ae857-500f-566d-8a2e-b9d985f01e1d",
+              "leftValue": "={{ $('Compose Fallback Payloads').first().json.counts.actionable }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a3aaaed9-b572-5148-98b0-86a1e5a7343d",
+      "name": "Send Slack Alerts?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3260,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "text/plain"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Compose Fallback Payloads').first().json.slackPayload) }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "fd3563d5-d5d6-528a-a0ab-1c64f5f0f593",
+      "name": "Slack: Post Fallback Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3480,
+        180
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "notes": "Revenue team channel. The webhook URL is a secret.",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────────────────\n// Audit & Log Summarizer\n// Final node on every path. Collects per-event outcomes, routing decisions,\n// HubSpot write results and the Slack dispatch status into one audit record,\n// and writes it to the n8n log for shipping to your log platform.\n// ─────────────────────────────────────────────────────────────────────────────\nconst cfg = $('Config & Safety Gate').first().json.config;\nconst parsed = $('Parse, Verify & Normalize Events').first().json;\nconst safeFirst = (name) => { try { return $(name).first().json; } catch (e) { return null; } };\nconst safeAll = (name) => { try { return $(name).all().map((i) => i.json); } catch (e) { return []; } };\nconst count = (rs) => rs.reduce((n, r) => n + (Array.isArray(r.results) ? r.results.length : 0), 0);\nconst errors = (rs) => rs.reduce((n, r) => n + (Array.isArray(r.errors) ? r.errors.length : 0), 0);\n\nconst composed = safeFirst('Compose Fallback Payloads');\nconst assoc = safeFirst('Attach Contact IDs to Tasks & Notes');\nconst upserts = safeAll('HubSpot: Upsert Contacts');\nconst tasks = safeAll('HubSpot: Batch Create Fallback Tasks');\nconst notes = safeAll('HubSpot: Batch Create Failure Notes');\nconst slack = safeAll('Slack: Post Fallback Alert');\n\nlet outcome;\nif (!composed) outcome = parsed.events.length ? 'not_routed' : 'no_fallback_events';\nelse if (composed.dryRun) outcome = 'dry_run';\nelse if (tasks.length) outcome = 'fallback_tasks_created';\nelse if (composed.createFallbackTasks && composed.counts.actionable === 0) outcome = 'all_suppressed';\nelse outcome = 'tasks_disabled';\n\nconst audit = {\n  outcome,\n  runId: cfg.runId,\n  executionMode: cfg.executionMode,\n  sandbox: cfg.sandboxMode,\n  source: parsed.source,\n  signature: parsed.signature,\n  intake: parsed.counters,\n  rejected: parsed.rejected,\n  routing: composed ? composed.routing : null,\n  counts: composed ? composed.counts : null,\n  outcomes: composed ? composed.outcomes : [],\n  hubspot: {\n    contactsUpserted: count(upserts),\n    contactsCreated: assoc ? assoc.contactsCreated : 0,\n    unresolvedEmails: assoc ? assoc.unresolvedEmails : [],\n    tasksCreated: count(tasks),\n    notesCreated: count(notes),\n    errors: errors(upserts) + errors(tasks) + errors(notes),\n  },\n  slack: { sent: slack.length > 0, response: slack.length ? String(slack[0].data ?? slack[0].body ?? 'ok').slice(0, 40) : null },\n  finishedAt: new Date().toISOString(),\n};\nconsole.log(`[routing-fallback-audit] ${JSON.stringify({ ...audit, outcomes: audit.outcomes.map((o) => ({ eventId: o.eventId, outcome: o.outcome, rule: o.rule, sdr: o.sdrEmail })) })}`);\nreturn [{ json: audit }];\n"
+      },
+      "id": "85c9435d-4baa-55a7-a657-88f7aaf42f0a",
+      "name": "Audit & Log Summarizer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3700,
+        260
+      ],
+      "notes": "Final audit record on every path.",
+      "notesInFlow": false
+    }
+  ],
+  "connections": {
+    "Routing Failure Webhook": {
+      "main": [
+        [
+          {
+            "node": "Config & Safety Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Synthetic Failure Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Synthetic Failure Events": {
+      "main": [
+        [
+          {
+            "node": "Config & Safety Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config & Safety Gate": {
+      "main": [
+        [
+          {
+            "node": "Parse, Verify & Normalize Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse, Verify & Normalize Events": {
+      "main": [
+        [
+          {
+            "node": "Has Fallback Events?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Fallback Events?": {
+      "main": [
+        [
+          {
+            "node": "Sandbox Mode?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Audit & Log Summarizer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sandbox Mode?": {
+      "main": [
+        [
+          {
+            "node": "Mock HubSpot Context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HubSpot: Find Contacts by Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: Find Contacts by Email": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: List Active Owners",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: List Active Owners": {
+      "main": [
+        [
+          {
+            "node": "Assemble Routing Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mock HubSpot Context": {
+      "main": [
+        [
+          {
+            "node": "Active SDR Round-Robin Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Routing Context": {
+      "main": [
+        [
+          {
+            "node": "Active SDR Round-Robin Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Active SDR Round-Robin Router": {
+      "main": [
+        [
+          {
+            "node": "Compose Fallback Payloads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose Fallback Payloads": {
+      "main": [
+        [
+          {
+            "node": "Dry Run?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dry Run?": {
+      "main": [
+        [
+          {
+            "node": "Audit & Log Summarizer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Fallback Tasks?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Fallback Tasks?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: Upsert Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Slack Alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: Upsert Contacts": {
+      "main": [
+        [
+          {
+            "node": "Attach Contact IDs to Tasks & Notes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Contact IDs to Tasks & Notes": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: Batch Create Fallback Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: Batch Create Fallback Tasks": {
+      "main": [
+        [
+          {
+            "node": "Log Failure Notes?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Failure Notes?": {
+      "main": [
+        [
+          {
+            "node": "HubSpot: Batch Create Failure Notes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Slack Alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HubSpot: Batch Create Failure Notes": {
+      "main": [
+        [
+          {
+            "node": "Send Slack Alerts?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Slack Alerts?": {
+      "main": [
+        [
+          {
+            "node": "Slack: Post Fallback Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Audit & Log Summarizer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack: Post Fallback Alert": {
+      "main": [
+        [
+          {
+            "node": "Audit & Log Summarizer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "Routing Failure Webhook": [
+      {
+        "json": {
+          "headers": {
+            "host": "n8n.example",
+            "content-type": "application/json",
+            "user-agent": "Calendly-Webhooks (synthetic)",
+            "calendly-webhook-signature": "t=1763293738,v1=73796e7468657469632d6e6f742d7265616c"
+          },
+          "params": {},
+          "query": {
+            "source": "calendly"
+          },
+          "body": {
+            "created_at": "2026-11-16T11:48:58.000000Z",
+            "created_by": "https://api.calendly.example/users/SYN-USER-0001",
+            "event": "routing_form_submission.created",
+            "payload": {
+              "uri": "https://api.calendly.example/routing_form_submissions/SYN-RFS-0001",
+              "routing_form": "https://api.calendly.example/routing_forms/SYN-RF-0001",
+              "questions_and_answers": [
+                {
+                  "question": "First name",
+                  "answer": "Taylor"
+                },
+                {
+                  "question": "Last name",
+                  "answer": "Brooks"
+                },
+                {
+                  "question": "Work email",
+                  "answer": "taylor@company.example"
+                },
+                {
+                  "question": "Company",
+                  "answer": "Company Example Ltd"
+                },
+                {
+                  "question": "Phone",
+                  "answer": "+1 555 010 3003"
+                },
+                {
+                  "question": "Country",
+                  "answer": "US"
+                },
+                {
+                  "question": "State",
+                  "answer": "MA"
+                },
+                {
+                  "question": "Company size",
+                  "answer": "51-200"
+                }
+              ],
+              "tracking": {
+                "utm_campaign": null,
+                "utm_source": "synthetic",
+                "utm_medium": null,
+                "utm_content": null,
+                "utm_term": null,
+                "salesforce_uuid": null
+              },
+              "submitter": null,
+              "submitter_type": null,
+              "result": {
+                "type": "custom_message",
+                "value": {
+                  "headline": "No one is available right now",
+                  "body": "We will reach out shortly."
+                }
+              },
+              "created_at": "2026-11-16T11:48:58.000000Z",
+              "updated_at": "2026-11-16T11:48:58.000000Z"
+            }
+          },
+          "webhookUrl": "https://n8n.example/webhook/routing/fallback",
+          "executionMode": "production"
+        }
+      }
+    ],
+    "HubSpot: Find Contacts by Email": [
+      {
+        "json": {
+          "total": 2,
+          "results": [
+            {
+              "id": "9100000001",
+              "properties": {
+                "hs_object_id": "9100000001",
+                "email": "alex@company.example",
+                "firstname": "Alex",
+                "lastname": "Miller",
+                "company": "Company Example Ltd",
+                "phone": null,
+                "country": "US",
+                "state": null,
+                "lifecyclestage": "lead",
+                "hubspot_owner_id": "83000002",
+                "routing_fallback_at": null,
+                "routing_fallback_status": null
+              },
+              "createdAt": "2026-08-01T10:00:00.000Z",
+              "updatedAt": "2026-11-16T11:30:00.000Z",
+              "archived": false
+            },
+            {
+              "id": "9100000004",
+              "properties": {
+                "hs_object_id": "9100000004",
+                "email": "morgan@company.example",
+                "firstname": "Morgan",
+                "lastname": "Diaz",
+                "company": "Company Example Ltd",
+                "phone": null,
+                "country": "US",
+                "state": null,
+                "lifecyclestage": "marketingqualifiedlead",
+                "hubspot_owner_id": null,
+                "routing_fallback_at": "2026-11-16T11:29:00.000Z",
+                "routing_fallback_status": null
+              },
+              "createdAt": "2026-08-01T10:00:00.000Z",
+              "updatedAt": "2026-11-16T11:30:00.000Z",
+              "archived": false
+            }
+          ]
+        }
+      }
+    ],
+    "HubSpot: List Active Owners": [
+      {
+        "json": {
+          "results": [
+            {
+              "id": "83000001",
+              "email": "sdr.east.one@example.com",
+              "type": "PERSON",
+              "firstName": "Riley",
+              "lastName": "East",
+              "userId": 83001001,
+              "createdAt": "2026-01-10T09:00:00.000Z",
+              "updatedAt": "2026-11-01T09:00:00.000Z",
+              "archived": false,
+              "teams": [
+                {
+                  "id": "syn-team-sdr",
+                  "name": "SDR (synthetic)",
+                  "primary": true
+                }
+              ]
+            },
+            {
+              "id": "83000002",
+              "email": "sdr.east.two@example.com",
+              "type": "PERSON",
+              "firstName": "Casey",
+              "lastName": "Harbor",
+              "userId": 83001002,
+              "createdAt": "2026-01-10T09:00:00.000Z",
+              "updatedAt": "2026-11-01T09:00:00.000Z",
+              "archived": false,
+              "teams": [
+                {
+                  "id": "syn-team-sdr",
+                  "name": "SDR (synthetic)",
+                  "primary": true
+                }
+              ]
+            },
+            {
+              "id": "83000003",
+              "email": "sdr.emea.one@example.com",
+              "type": "PERSON",
+              "firstName": "Noor",
+              "lastName": "Atlas",
+              "userId": 83001003,
+              "createdAt": "2026-01-10T09:00:00.000Z",
+              "updatedAt": "2026-11-01T09:00:00.000Z",
+              "archived": false,
+              "teams": [
+                {
+                  "id": "syn-team-sdr",
+                  "name": "SDR (synthetic)",
+                  "primary": true
+                }
+              ]
+            },
+            {
+              "id": "83000004",
+              "email": "sdr.pool.one@example.com",
+              "type": "PERSON",
+              "firstName": "Jordan",
+              "lastName": "Pool",
+              "userId": 83001004,
+              "createdAt": "2026-01-10T09:00:00.000Z",
+              "updatedAt": "2026-11-01T09:00:00.000Z",
+              "archived": false,
+              "teams": [
+                {
+                  "id": "syn-team-sdr",
+                  "name": "SDR (synthetic)",
+                  "primary": true
+                }
+              ]
+            },
+            {
+              "id": "83000009",
+              "email": "sdr.fallback@example.com",
+              "type": "PERSON",
+              "firstName": "Fallback",
+              "lastName": "Desk",
+              "userId": 83001009,
+              "createdAt": "2026-01-10T09:00:00.000Z",
+              "updatedAt": "2026-11-01T09:00:00.000Z",
+              "archived": false,
+              "teams": [
+                {
+                  "id": "syn-team-sdr",
+                  "name": "SDR (synthetic)",
+                  "primary": true
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "HubSpot: Upsert Contacts": [
+      {
+        "json": {
+          "status": "COMPLETE",
+          "results": [
+            {
+              "id": "9100000001",
+              "properties": {
+                "email": "alex@company.example",
+                "hs_object_id": "9100000001"
+              },
+              "new": false,
+              "createdAt": "2026-11-16T11:49:00.000000Z",
+              "updatedAt": "2026-11-16T11:49:00.000000Z",
+              "archived": false
+            },
+            {
+              "id": "9100000002",
+              "properties": {
+                "email": "priya@brightfield.example",
+                "hs_object_id": "9100000002"
+              },
+              "new": true,
+              "createdAt": "2026-11-16T11:49:00.000000Z",
+              "updatedAt": "2026-11-16T11:49:00.000000Z",
+              "archived": false
+            },
+            {
+              "id": "9100000003",
+              "properties": {
+                "email": "diego@sandcastle.example",
+                "hs_object_id": "9100000003"
+              },
+              "new": true,
+              "createdAt": "2026-11-16T11:49:00.000000Z",
+              "updatedAt": "2026-11-16T11:49:00.000000Z",
+              "archived": false
+            },
+            {
+              "id": "9100000004",
+              "properties": {
+                "email": "morgan@company.example",
+                "hs_object_id": "9100000004"
+              },
+              "new": false,
+              "createdAt": "2026-11-16T11:49:00.000000Z",
+              "updatedAt": "2026-11-16T11:49:00.000000Z",
+              "archived": false
+            },
+            {
+              "id": "9100000005",
+              "properties": {
+                "email": "taylor@company.example",
+                "hs_object_id": "9100000005"
+              },
+              "new": true,
+              "createdAt": "2026-11-16T11:49:00.000000Z",
+              "updatedAt": "2026-11-16T11:49:00.000000Z",
+              "archived": false
+            }
+          ],
+          "startedAt": "2026-11-16T11:49:00.000000Z",
+          "completedAt": "2026-11-16T11:49:00.000000Z"
+        }
+      }
+    ],
+    "HubSpot: Batch Create Fallback Tasks": [
+      {
+        "json": {
+          "status": "COMPLETE",
+          "results": [
+            {
+              "id": "940000000001",
+              "properties": {
+                "hs_task_status": "NOT_STARTED",
+                "hs_task_priority": "HIGH"
+              }
+            },
+            {
+              "id": "940000000002",
+              "properties": {
+                "hs_task_status": "NOT_STARTED",
+                "hs_task_priority": "HIGH"
+              }
+            },
+            {
+              "id": "940000000003",
+              "properties": {
+                "hs_task_status": "NOT_STARTED",
+                "hs_task_priority": "HIGH"
+              }
+            }
+          ],
+          "pinned": "synthetic-mock-response"
+        }
+      }
+    ],
+    "HubSpot: Batch Create Failure Notes": [
+      {
+        "json": {
+          "status": "COMPLETE",
+          "results": [
+            {
+              "id": "950000000001",
+              "properties": {}
+            },
+            {
+              "id": "950000000002",
+              "properties": {}
+            },
+            {
+              "id": "950000000003",
+              "properties": {}
+            }
+          ],
+          "pinned": "synthetic-mock-response"
+        }
+      }
+    ],
+    "Slack: Post Fallback Alert": [
+      {
+        "json": {
+          "data": "ok",
+          "pinned": "synthetic-mock-response"
+        }
+      }
+    ]
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": false,
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionTimeout": 3600
+  },
+  "versionId": "dcccd391-8285-50eb-81d1-b47c152b5b1a",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
