@@ -61,6 +61,8 @@ An instant router failing is the most expensive bug in inbound. A prospect asked
 
 ## 2. Architecture
 
+![n8n Chili Piper HubSpot Instant Routing Fallback Handler Workflow](https://raw.githubusercontent.com/dhrobinsystems/n8n-chilipiper-hubspot-instant-routing-fallback-handler/main/workflow-overview.png)
+
 ```mermaid
 flowchart LR
     W[Routing Failure Webhook<br/>?source=chilipiper / calendly / hubspot] --> CFG
